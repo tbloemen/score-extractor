@@ -3,6 +3,7 @@ A python script which, given a folder of songs with pdf's in them, splits them i
 """
 import re
 import shutil
+from fileinput import filename
 from pathlib import Path
 
 import pymupdf
@@ -40,11 +41,53 @@ def rec_folder_path_helper(path) -> tuple[list[Path], list[Path]]:
     return res_scores, res_examples
 
 
-def extract_parts(doc) -> None:
-    pass
+def get_page_numbers(doc: Document) -> list[int]:
+    page_idxs = []
+
+    page: Page
+    for page_number, page in enumerate(doc.pages()):
+        blocks = page.get_textpage().extractDICT()["blocks"]
+        for block in blocks:
+            for line in block["lines"]:
+                for span in line["spans"]:
+                    font_size = span["size"]
+                    if font_size > 20:
+                        page_idxs.append(page_number)
+    return page_idxs
+
+
+def extract_parts(doc: Document) -> list[tuple[Document, Path]]:
+    page_numbers = get_page_numbers(doc)
+    original_doc = pymupdf.open(doc.name)
+    dir_name = "extracted_scores"
+    curr_dir = (Path(doc.name).parent.joinpath(dir_name))
+    curr_dir.mkdir(exist_ok=True, parents=True)
+    filename = curr_dir.joinpath(Path(doc.name).name)
+    shutil.copy(doc.name, filename)
+    copied_doc = pymupdf.open(filename)
+
+    result = []
+    for idx in range(len(page_numbers) - 1):
+        start_page = page_numbers[idx]
+        end_page = page_numbers[idx + 1]
+        pages = []
+        for page_number in range(start_page, end_page):
+            pages.append(page_number)
+
+        this_doc = copied_doc
+
+        new_filename = f"{this_doc.name} - instrument {idx}.pdf"
+        this_doc.select(pages)
+        this_doc.save(new_filename)
+        newPath = curr_dir.joinpath(new_filename)
+        smaller_doc = pymupdf.open(newPath)
+        result.append((smaller_doc, newPath))
+    return result
+
 
 def clean_text(text: str) -> str:
     return re.sub('[\W_]+', ' ', text).lower().strip()
+
 
 def predict_instr(doc: Document, name: str) -> Instrument:
     counter = {}
@@ -58,7 +101,7 @@ def predict_instr(doc: Document, name: str) -> Instrument:
             page: Page
             for page in doc:
                 bounds: Rect = page.bound()
-                newBound = Rect(bounds.tl, Point(bounds.br.x/3, bounds.br.y/3))
+                newBound = Rect(bounds.tl, Point(bounds.br.x / 3, bounds.br.y / 3))
                 text = page.get_text("text", clip=newBound)
                 if clean_text(representation) in clean_text(text):
                     counter[instrument] = counter.get(instrument, 0) + 1
@@ -67,29 +110,35 @@ def predict_instr(doc: Document, name: str) -> Instrument:
     return max(counter, key=counter.get)
 
 
+def allocate_instruments(doc: Document, pdf_file: Path):
+    try:
+        instrument = predict_instr(doc, pdf_file.name)
+        print(instrument)
+        my_dir = Path.cwd().joinpath(f"result/{instrument}")
+        my_dir.mkdir(exist_ok=True, parents=True)
+        shutil.copy(pdf_file, my_dir.joinpath(pdf_file.name))
+    except ValueError:
+        my_dir = Path.cwd().joinpath("result/Afvalstapel")
+        my_dir.mkdir(exist_ok=True, parents=True)
+        shutil.copy(pdf_file, my_dir.joinpath(pdf_file.name))
+
+
 def extract_song(pdf_file: Path):
     doc = pymupdf.open(pdf_file)
     # Check if song is already split or is still in parts
     # For now: if song is longer than 16 pages, it is definitively parts
     if doc.page_count > 16:
-        extract_parts(doc)
+        docsAndNames = extract_parts(doc)
+        for doc, name in docsAndNames:
+            allocate_instruments(doc, name)
     else:
-        try:
-            instrument = predict_instr(doc, pdf_file.name)
-            print(instrument)
-            my_dir = Path.cwd().joinpath(f"result/{instrument}")
-            my_dir.mkdir(exist_ok=True, parents=True)
-            shutil.copy(pdf_file, my_dir.joinpath(pdf_file.name))
-        except ValueError:
-            my_dir = Path.cwd().joinpath("result/Afvalstapel")
-            my_dir.mkdir(exist_ok=True, parents=True)
-            shutil.copy(pdf_file, my_dir.joinpath(pdf_file.name))
+        allocate_instruments(doc, pdf_file)
+
 
 def main():
     """
     The main function that runs the script.
     """
-    print("Hello world")
     scores, examples = get_folder_paths()
     print(scores)
     print("-----")
