@@ -1,9 +1,8 @@
 """
-A python script which, given a folder of songs with pdf's in them, splits them into the parts of their instrument.
+A python script which, given a folder of songs with pdfs in them, splits them into the parts of their instrument.
 """
 import re
 import shutil
-from fileinput import filename
 from pathlib import Path
 
 import pymupdf
@@ -15,22 +14,39 @@ MUSIC_FILE_EXTENSIONS = [".mp3", ".ogg", ".wav", ".flac", ".aiff", ".midi"]
 
 
 def create_example_folder(examples: list[Path]):
-    dir = Path.cwd().joinpath("result/Examples")
-    dir.mkdir(exist_ok=True, parents=True)
+    """
+    Creates the folder "Examples" in the result directory, and copies all examples to that folder.
+
+    :param examples: A list of Paths which point to examples (e.g. mp3, wav and midi files).
+    """
+    example_dir = Path.cwd().joinpath("result/Examples")
+    example_dir.mkdir(exist_ok=True, parents=True)
     for example in examples:
-        shutil.copy(example, dir.joinpath(example.name))
+        shutil.copy(example, example_dir.joinpath(example.name))
 
 
 def get_folder_paths() -> tuple[list[Path], list[Path]]:
+    """
+    Gets all the paths for the scores and examples.
+
+    :return: A list of Paths for the scores, and a list of Paths for the examples.
+    """
     p = Path.cwd().joinpath("resources")
     return rec_folder_path_helper(p)
 
 
 def rec_folder_path_helper(path) -> tuple[list[Path], list[Path]]:
+    """
+    Helper function for `get_folder_paths()`. Recursively checks if the path provided is a score, example or
+    directory. If it is a directory, recurse all subpaths.
+
+    :param path: The path to check if it is a score, example or directory.
+    :return: A list of Paths for the scores and a list of Paths for the examples.
+    """
     res_scores, res_examples = [], []
     if path.is_dir():
-        for subpath in path.iterdir():
-            scores, examples = rec_folder_path_helper(subpath)
+        for sub_path in path.iterdir():
+            scores, examples = rec_folder_path_helper(sub_path)
             res_scores.extend(scores)
             res_examples.extend(examples)
     else:
@@ -42,7 +58,16 @@ def rec_folder_path_helper(path) -> tuple[list[Path], list[Path]]:
 
 
 def get_page_numbers(doc: Document) -> list[int]:
-    page_idxs = []
+    """
+    This function gets the page numbers where a new instrument starts. For example: if the pdf file has piano parts
+    for page 1 through 6, and guitar parts for pages 7 through 9, this would return [1, 7].
+
+    TODO: this function currently does not work, it can't recognize font size consistently with scanned in pdfs.
+
+    :param doc: The parts file containing all the instrument parts.
+    :return: A list of the page numbers where a new instrument starts.
+    """
+    page_idxes = []
 
     page: Page
     for page_number, page in enumerate(doc.pages()):
@@ -52,13 +77,19 @@ def get_page_numbers(doc: Document) -> list[int]:
                 for span in line["spans"]:
                     font_size = span["size"]
                     if font_size > 20:
-                        page_idxs.append(page_number)
-    return page_idxs
+                        page_idxes.append(page_number)
+    return page_idxes
 
 
 def extract_parts(doc: Document) -> list[tuple[Document, Path]]:
+    """
+    Splits a parts file up into each instrument part.
+
+    :param doc: The parts file containing all the instrument parts.
+    :return: A list of instrument parts with their new filename.
+    """
     page_numbers = get_page_numbers(doc)
-    original_doc = pymupdf.open(doc.name)
+    pymupdf.open(doc.name)
     dir_name = "extracted_scores"
     curr_dir = (Path(doc.name).parent.joinpath(dir_name))
     curr_dir.mkdir(exist_ok=True, parents=True)
@@ -86,10 +117,24 @@ def extract_parts(doc: Document) -> list[tuple[Document, Path]]:
 
 
 def clean_text(text: str) -> str:
+    """
+    Returns a string where every non-alphanumeric character is removed, and is standardized to lower case.
+
+    :param text: The text to be cleaned.
+    :return: Clean text.
+    """
     return re.sub('[\W_]+', ' ', text).lower().strip()
 
 
 def predict_instr(doc: Document, name: str) -> Instrument:
+    """
+    Tries to predict an instrument of the pdf file provided.
+    If an instrument can't be predicted, it throws a ValueError.
+
+    :param doc: The pdf file to predict.
+    :param name: The filename of the pdf file.
+    :return: The instrument predicted.
+    """
     counter = {}
 
     for instrument in create_instruments():
@@ -98,9 +143,8 @@ def predict_instr(doc: Document, name: str) -> Instrument:
             if representation in clean_text(name):
                 return instrument
 
-            page: Page
             for page in doc:
-                bounds: Rect = page.bound()
+                bounds = page.bound()
                 newBound = Rect(bounds.tl, Point(bounds.br.x / 3, bounds.br.y / 3))
                 text = page.get_text("text", clip=newBound)
                 if clean_text(representation) in clean_text(text):
@@ -111,6 +155,13 @@ def predict_instr(doc: Document, name: str) -> Instrument:
 
 
 def allocate_instruments(doc: Document, pdf_file: Path):
+    """
+    Puts an instrument part into the correct folder.
+    If an instrument can't be predicted, it goes the Afvalstapel (trash can).
+
+    :param doc: The pdf document to be predicted.
+    :param pdf_file: The Path object corresponding to the pdf file to be predicted.
+    """
     try:
         instrument = predict_instr(doc, pdf_file.name)
         print(instrument)
@@ -124,6 +175,11 @@ def allocate_instruments(doc: Document, pdf_file: Path):
 
 
 def extract_song(pdf_file: Path):
+    """
+    Extracts the song to the correct folder, or folders if the file provided contains multiple parts.
+
+    :param pdf_file: The path to the pdf file containing a part, or multiple parts.
+    """
     doc = pymupdf.open(pdf_file)
     # Check if song is already split or is still in parts
     # For now: if song is longer than 16 pages, it is definitively parts
