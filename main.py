@@ -31,8 +31,13 @@ def get_folder_paths() -> tuple[list[Path], list[Path]]:
 
     :return: A list of Paths for the scores, and a list of Paths for the examples.
     """
+
     p = Path.cwd().joinpath("resources")
-    return rec_folder_path_helper(p)
+    if p.exists():
+        return rec_folder_path_helper(p)
+    p.mkdir()
+    raise FileNotFoundError("The folder 'resources' had not been created yet. It has now been created, please place "
+                            "the scores you wish to attract in this folder.")
 
 
 def rec_folder_path_helper(path) -> tuple[list[Path], list[Path]]:
